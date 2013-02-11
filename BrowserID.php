@@ -15,7 +15,10 @@
 function BrowserID_Handle($returnto = null, $ep = 'https://persona.org/verify')
 {
   if(!$returnto) {
-    $returnto = '//'.getenv('SERVER_NAME').getenv('REQUEST_URI');
+    $returnto = '//'
+              . getenv('SERVER_NAME')
+              . getenv('REQUEST_URI')
+    ;
   }
   if(session_status() != \PHP_SESSION_ACTIVE) {
     session_start();
@@ -32,20 +35,24 @@ function BrowserID_Handle($returnto = null, $ep = 'https://persona.org/verify')
   {
     $assertion = $_POST['BrowserIDAssertion'];
     $audience  = getenv('HTTP_HOST');
-    $stream    = stream_context_create(array('http' => array(
-      'method' => 'POST'
-    , 'content'=> "assertion=$assertion&audience=$audience"
-    , 'header' => 'Content-type: application/x-www-form-urlencoded'
-    )));
+    $stream    = stream_context_create(
+    [ 'http'
+    => [ 'method' => 'POST'
+       , 'content'=> "assertion=$assertion&audience=$audience"
+       , 'header' => 'Content-type: application/x-www-form-urlencoded'
+       ]
+    ]);
     if(false === $res = file_get_contents($ep, false, $stream)) {
-      throw new \Exception('['.$ep.']: No Response');
+      throw new \Exception('[' . $ep . ']: No Response');
     }
     elseif(false === ($json = json_decode($res))) {
-      throw new \Exception('['.$ep.']: Parsing Response JSON Failed.');
+      throw new \Exception('[' . $ep . ']: Parsing Response JSON Failed.');
     }
     elseif(!isset($json->status) || $json->status == 'failure') {
-      $reason = empty($json->reason) ? 'Reason unavailable.' : $json->reason;
-      throw new \Exception('['.$ep.']: '.$reason);
+      $reason = empty($json->reason)
+          ? 'Reason unavailable.'
+          : $json->reason;
+      throw new \Exception('[' . $ep . ']: '.$reason);
     }
     else {
       if($json->status == 'okay' && isset($json->email)) {
@@ -57,7 +64,7 @@ function BrowserID_Handle($returnto = null, $ep = 'https://persona.org/verify')
         unset($_SESSION['BrowserIDAuth']);
       }
       // Redirect & continue processing
-      exit(header('Location: '.$returnto));
+      exit(header('Location: ' . $returnto));
     }
   }
   // return HTML forms.
@@ -68,20 +75,23 @@ function BrowserID_Handle($returnto = null, $ep = 'https://persona.org/verify')
       $u = $_SESSION['BrowserIDAuth'];
       return
         '<form method="post" id="BrowserIDLogout">'
-      . '<input type="submit" name="BrowserIDDestroy" value="Log Out ['.$u.']">'
+      . '<input type="submit" name="BrowserIDDestroy" '
+      .   'value="Log Out [' . $u . ']">'
       . '</form>';
     }
     return
-      '<form id="BrowserIDLogin" method="POST" action="'.$returnto.'">'
+      '<form id="BrowserIDLogin" method="POST" action="' . $returnto . '">'
     . '<input id="BrowserIDAssertion" type="hidden" name="BrowserIDAssertion">'
     . '<script src="https://login.persona.org/include.js"></script>'
     . '<script>'
     . 'function BrowserIDVerify() { '
-      . 'navigator.id.get(function(ass){ '
-      . '  if(ass){ '
-      . '    document.getElementById("BrowserIDAssertion").value = ass; '
+      . 'navigator.id.get(function(assertion){ '
+      . '  if(assertion){ '
+      . '    document.getElementById("BrowserIDAssertion").value = assertion; '
       . '    document.getElementById("BrowserIDLogin").submit(); '
-      . '  } else { alert("BrowserID Assertion Failed."); } '
+      . '  } else { '
+      . '    alert("BrowserID Assertion Failed."); '
+      . '  } '
       . '});'
     . '}'
     . '</script>'
