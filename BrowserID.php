@@ -108,7 +108,7 @@ class Persona
      * @param string $audience Audience to pass to the verifier.
      * @param string $processor URL to receive AJAX POST requests.
      * @param string $endpoint Endpoint for auth provider.
-     * @return object $this Self
+     * @return \kafene\Persona $this Self
      */
     function __construct($audience = '', $processor = '', $endpoint = null)
     {
@@ -138,7 +138,7 @@ class Persona
      * In the absence of a processor URL, build a likely one.
      *
      * @param string $new New (or initial) processor URL.
-     * @return string|object Existing processor URL, or $this Self
+     * @return string|object Existing processor URL, or \kafene\Persona $this Self
      * @throws \Exception If the URL is invalid.
      */
     function processor($new = null)
@@ -172,7 +172,7 @@ class Persona
      * Set or get audience URL.
      *
      * @param string $new New (or initial) audience URL.
-     * @return string|object Existing audience URL, or $this Self
+     * @return string|\kafene\Persona Existing audience URL, or $this Self
      * @throws \Exception If the URL is invalid.
      */
     function audience($new = null)
@@ -208,7 +208,7 @@ class Persona
      * Set or get Endpoint URL.
      *
      * @param string $new New (or initial) endpoint URL.
-     * @return string|object Existing endpoint, or $this Self
+     * @return string|\kafene\Persona Existing endpoint, or $this Self
      * @throws \Exception If the URL is invalid.
      */
     function endpoint($new = null)
@@ -338,7 +338,7 @@ class Persona
      * Determine if a user's assertion is expired.
      * This is mostly of use to the endpoint.
      *
-     * @return boolean
+     * @return boolean If the assertion has expired.
      */
     function expired()
     {
@@ -356,7 +356,7 @@ class Persona
      * either return `true` or their user info.
      *
      * @param boolean $bool Whether to return true, or user info for logged in users.
-     * @return boolean|\stdClass False if the user is not logged in, or true/user info.
+     * @return boolean|\ArrayObject False if the user is not logged in, or true/user info.
      */
     function user($bool = false)
     {
@@ -373,7 +373,8 @@ class Persona
                 'issuer' => '',
             ];
             $info = array_merge($default, $_SESSION['persona_info']);
-            return $bool ? true : (object) $info;
+            $info = new \ArrayObject($info, \ArrayObject::ARRAY_AS_PROPS);
+            return $bool ? true : $info;
         }
     }
 
@@ -396,23 +397,37 @@ class Persona
      * that meet the criteria of being a Persona assertion,
      * and sending the JSON response.
      *
-     * @return null
+     * @param boolean $respond Whether to send the response once the output is ready.
+     * @return null|array $output The response for the client.
      */
-    function server()
+    function server($respond = true, $exit = true)
     {
-        # All of these things must be true before this function takes over.
         if(!$this->shouldServe()) return;
         $output = ('login' == $_POST['persona_action'])
             ? $this->login()
             : $this->logout();
         $email = isset($output['email']) ? $output['email'] : '';
         $output = json_encode($output, JSON_FORCE_OBJECT);
+        if($respond) $this->respond($output, $exit);
+        else return $output;
+    }
+
+    /**
+     * Serves a JSON response and exits the program if $exit is true.
+     *
+     * @param array $output Response output.
+     * @param boolean $exit Exit after sending response.
+     * @return null|string $output The output JSON data.
+     */
+    function respond($output, $exit = true)
+    {
         http_response_code(200);
         header('Content-Type: application/json');
         # header(sprintf('Content-Length: %d', strlen($output)));
         header(sprintf('X-Persona-Audience: %s', $this->audience()));
         if($email) header(sprintf('X-Persona-User: %s', $email));
-        exit($output);
+        if($exit) exit($output);
+        return $output;
     }
 
     /**
@@ -518,6 +533,7 @@ namespace {
  * @param string $audience Audience to pass to the verifier.
  * @param string $endpoint Endpoint for auth provider.
  * @param string $processor URL to receive AJAX POST requests.
+ * @return string \kafene\Persona::render()
  */
 function BrowserID_Handle($audience = '', $endpoint = null, $processor = '')
 {
