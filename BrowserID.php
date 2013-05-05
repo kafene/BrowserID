@@ -46,7 +46,7 @@ namespace kafene
  *
  * CHANGES:
  *
- * @ 2013-05-05:
+ * 2013-05-05:
  *     new session/request keys:
  *         'BrowserIDAuth' => 'persona_auth';
  *         'BrowserIDAssertion' => 'persona_assertion';
@@ -58,7 +58,7 @@ namespace kafene
  *
  * --------------------------------------------------------------------------- *
  * --------------------------------------------------------------------------- *
-*/
+ */
 class Persona
 {
 
@@ -398,6 +398,7 @@ class Persona
      * and sending the JSON response.
      *
      * @param boolean $respond Whether to send the response once the output is ready.
+     * @param boolean $exit Which $exit paramater will be sent to respond()
      * @return null|array $output The response for the client.
      */
     function server($respond = true, $exit = true)
