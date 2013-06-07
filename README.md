@@ -37,7 +37,13 @@ drop-in solution.
 
 ## Changes
 
-2013-05-05:
+### 2013-06-07
+
+* Fixed error situation in respond() function.
+* Improved JS to work mostly without PHP.
+* Improved error handling using an Exception handler.
+
+### 2013-05-05:
 
 * New session/request keys:
     * `BrowserIDAuth` => `persona_auth`;
@@ -253,6 +259,7 @@ function getResponse($assertion) {
     $response = file_get_contents($this->endpoint(), null, $ctx);
     return $response;
 }
+```
 
 ### checkResponse()
 
@@ -488,6 +495,8 @@ window.navigator.id || document.write('<script src="https://login.persona.org/in
 window.jQuery || document.write('<script src="//ajax.googleapis.com/ajax/libs/jquery/2.0.0/jquery.min.js">\x3C/script>');
 </script>
 <script>
+```
+```js
 $(function() {
     var auth_field = $("#persona_auth a#persona_action");
     navigator.id.watch({
@@ -532,6 +541,8 @@ $(function() {
         <?php endif; ?>
     });
 });
+```
+```php
 </script>
 <!-- <a href="" class="auth" id="persona_action">[<?= _('Loading &hellip;') ?>]</a> -->
 <?php if($auth): ?>
