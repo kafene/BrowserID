@@ -115,7 +115,9 @@ class Persona
         $this->audience($audience);
         $this->processor($processor);
         $this->endpoint($endpoint);
-        if(session_status() != PHP_SESSION_ACTIVE) session_start();
+        if(session_status() != PHP_SESSION_ACTIVE) {
+            session_start();
+        }
         return $this;
     }
 
@@ -143,11 +145,14 @@ class Persona
      */
     function processor($new = null)
     {
-        if($new) $this->processor = $new;
-        if(!$this->processor) $this->processor = $this->guessProcessor();
-        if(!$new) return $this->processor;
+        if(!$this->processor || $new) {
+            $this->processor = $new ?: $this->guessProcessor();
+        }
+        if(null === $new) {
+            return $this->processor;
+        }
         if(!filter_var($this->processor, FILTER_VALIDATE_URL)) {
-            $errstr = sprintf(_('Invalid processor "%s".'), $this->processor);
+            $errstr = 'Invalid processor "'.$this->processor.'".';
             throw new \Exception($errstr);
         }
         return $this;
@@ -177,11 +182,14 @@ class Persona
      */
     function audience($new = null)
     {
-        if($new) $this->audience = $new;
-        if(!$this->audience) $this->audience = $this->guessAudience();
-        if(!$new) return $this->audience;
+        if(!$this->audience || $new) {
+            $this->audience = $new ?: $this->guessAudience();
+        }
+        if(null === $new) {
+            return $this->audience;
+        }
         if(!filter_var($this->audience, FILTER_VALIDATE_URL)) {
-            $errstr = sprintf(_('Invalid audience "%s".'), $this->audience);
+            $errstr = 'Invalid audience "'.$this->audience.'".';
             throw new \Exception($errstr);
         }
         return $this;
@@ -198,9 +206,8 @@ class Persona
         $ssl = filter_var(getenv('HTTPS'), FILTER_VALIDATE_BOOLEAN);
         $scheme = $ssl ? 'https' : 'http';
         $host = getenv('HTTP_HOST') ?: getenv('SERVER_NAME');
-        $port = intval(getenv('SERVER_PORT')) ?: 80;
-        if(($ssl && 443 == $port) || 80 == $port) $port = '';
-        else $port = sprintf(':%d', $port);
+        $p = intval(getenv('SERVER_PORT')) ?: 80;
+        $port = (($ssl && 443 == $p) || 80 == $p) ? '' : sprintf(':%d', $p);
         return sprintf('%s://%s%s', $scheme, $host, $port);
     }
 
@@ -213,10 +220,12 @@ class Persona
      */
     function endpoint($new = null)
     {
-        if(!$new) return $this->endpoint;
+        if(null === $new) {
+            return $this->endpoint;
+        }
         $this->endpoint = $new;
         if(!filter_var($this->endpoint, FILTER_VALIDATE_URL)) {
-            $errstr = sprintf(_('Invalid endpoint "%s".'), $this->endpoint);
+            $errstr = 'Invalid endpoint "'.$this->endpoint.'".';
             throw new \Exception($errstr);
         }
         return $this;
@@ -237,8 +246,11 @@ class Persona
             'header' => 'Content-type: application/x-www-form-urlencoded',
             'content' => http_build_query($data, '', '&')
         ]]);
-        $response = file_get_contents($this->endpoint(), null, $ctx);
-        return $response;
+        if($response = file_get_contents($this->endpoint(), null, $ctx)) {
+            return $response;
+        } else {
+            throw new \Exception('Getting response from endpoint failed.');
+        }
     }
 
     /**
@@ -252,36 +264,33 @@ class Persona
     {
         # Check that response was rec'd.
         if(empty($response) || !$response) {
-            return _('No response was received from the verifier.');
+            throw new \Exception('No response was received from the verifier.');
         }
         # Check for ok JSON
         $json = $this->response = json_decode($response);
         if(json_last_error() !== JSON_ERROR_NONE) {
-            return _('Parsing response JSON failed.');
+            throw new \Exception('Parsing response JSON failed.');
         }
         # Check response has status
         if(empty($json->status)) {
-            return _('No status received from endpoint.');
+            throw new \Exception('No status received from endpoint.');
         }
         # Check failure status
         if(preg_match('/fail(ure|ed)?/i', $json->status)) {
-            $reason = empty($json->reason)
-                ? _('Unknown reason.')
-                : $json->reason;
-            return sprintf(_('Authentication failure: %s'), $reason);
+            $reason = empty($json->reason) ? 'Unknown reason.' : $json->reason;
+            throw new \Exception("Authentication failure: $reason");
         }
         # Check for 'okay' status
         if($json->status != 'okay') {
-            return _('"Okay" response was not received from the endpoint.');
+            throw new \Exception('"Okay" response was not received from the endpoint.');
         }
         # Check for email
         if(empty($json->email)) {
-            return _('Email was not received with response');
+            throw new \Exception('Email was not received with response');
         }
         # Verify email
-        $filter = FILTER_VALIDATE_EMAIL;
-        if(!filter_var($json->email, $filter)) {
-            return _('Invalid Email address.');
+        if(!filter_var($json->email, FILTER_VALIDATE_EMAIL)) {
+            throw new \Exception('Invalid Email address.');
         }
         # All tests passed.
         return true;
@@ -294,26 +303,25 @@ class Persona
      */
     protected function login()
     {
-        $output = ['status' => 'failure', 'reason' => _('Unknown reason.')];
+        $output = [
+            'error' => true,
+            'message' => 'Unknown reason.',
+        ];
         $filter = FILTER_UNSAFE_RAW;
         $flags = FILTER_FLAG_STRIP_LOW | FILTER_FLAG_STRIP_HIGH;
         $assertion = filter_input(INPUT_POST, 'assertion', $filter, $flags);
         if(!$assertion) {
-            $output['reason'] = _('Missing assertion.');
-            return $output;
+            throw new \Exception('Missing assertion.');
         }
         $this->response = $this->getResponse($assertion);
         # We'll either get `true` for success, or error strings for errors.
-        $check = $this->checkResponse($this->response);
-        if(true === $check) {
-            $json = $this->response;
-            $_SESSION['persona_auth'] = $json->email;
-            $_SESSION['persona_info'] = (array) $json;
-            $output['status'] = 'ok';
-            $output['email'] = $json->email;
-        } else {
-            $output['reason'] = $check;
+        if(true !== $check = $this->checkResponse($this->response)) {
+            throw new \Exception('checkResponse() failed.');
         }
+        $json = $this->response;
+        $_SESSION['persona_auth'] = $json->email;
+        $_SESSION['persona_info'] = (array) $json;
+        $output['email'] = $json->email;
         return $output;
     }
 
@@ -325,13 +333,13 @@ class Persona
      */
     protected function logout()
     {
-        $output = ['status' => 'failure'];
-        $_SESSION['persona_auth'] = false;
-        unset($_SESSION['persona_auth']);
-        $oops = isset($_SESSION['persona_auth']);
-        $output['status'] = $oops ? 'failure' : 'ok';
-        $output['reason'] = 'Logout failed.';
-        return $output;
+        $_SESSION['persona_auth'] = $_SESSION['persona_info'] = null;
+        unset($_SESSION['persona_auth'], $_SESSION['persona_info']);
+        if(!isset($_SESSION['persona_auth'], $_SESSION['persona_info'])) {
+            return true;
+        } else {
+            throw new \Exception('Logout failed.');
+        }
     }
 
     /**
@@ -344,11 +352,11 @@ class Persona
     {
         $user = $this->user();
         # @todo - maybe throw an exception - checking expired with no login?
-        if(!$user) return true;
-        if(!isset($_SESSION['persona_info']['expires'])) return true;
+        if(!$user || !isset($_SESSION['persona_info']['expires'])) {
+            return true;
+        }
         $expires = (int) $_SESSION['persona_info']['expires'] / 1000; # ms -> s
-        if($expires > time()) return true;
-        return false;
+        return $expires > time();
     }
 
     /**
@@ -356,9 +364,10 @@ class Persona
      * either return `true` or their user info.
      *
      * @param boolean $bool Whether to return true, or user info for logged in users.
+     * @param null $info Reference to info - useful if $bool is used.
      * @return boolean|\ArrayObject False if the user is not logged in, or true/user info.
      */
-    function user($bool = false)
+    function user($bool = false, &$info = null)
     {
         if(isset($_SESSION['persona_auth'], $_SESSION['persona_info'])) {
             if($this->expired()) {
@@ -366,7 +375,6 @@ class Persona
                 return false;
             }
             $default = [
-                'status' => 'failure',
                 'email' => '',
                 'audience' => $this->audience(), 
                 'expires' => 0,
@@ -379,6 +387,22 @@ class Persona
     }
 
     /**
+     * Handle error responses
+     *
+     * @param Exception $e
+     */
+    function ajaxError(\Exception $e) {
+        $message = sprintf('%s [%s]', $e->getMessage(), $e->getLine());
+        $this->respond(json_encode([
+            'error' => true,
+            'message' => $message,
+            'line' => $e->getLine(),
+            'file' => $e->getFile(),
+            'exception' => $e,
+        ], JSON_FORCE_OBJECT));
+    }
+
+    /**
      * Used to determine whether the current request should be processed
      * as a Persona assertion verification request.
      *
@@ -388,8 +412,7 @@ class Persona
     {
         return ('XMLHttpRequest' == getenv('HTTP_X_REQUESTED_WITH'))
             && ('POST'=== strtoupper(getenv('REQUEST_METHOD')))
-            && (!empty($_POST['persona_action']))
-            && (in_array($_POST['persona_action'], ['login', 'logout']));
+            && (!empty($_POST['persona_action']));
     }
 
     /**
@@ -403,14 +426,26 @@ class Persona
      */
     function server($respond = true, $exit = true)
     {
-        if(!$this->shouldServe()) return;
-        $output = ('login' == $_POST['persona_action'])
-            ? $this->login()
-            : $this->logout();
-        $email = isset($output['email']) ? $output['email'] : '';
-        $output = json_encode($output, JSON_FORCE_OBJECT);
-        if($respond) $this->respond($output, $exit);
-        else return $output;
+        if(!$this->shouldServe()) {
+            return;
+        }
+        set_exception_handler([$this, 'ajaxError']);
+        set_error_handler(function($n, $s, $f, $l) {
+            $this->ajaxError(new \ErrorException($s, $n, 0, $f, $l));
+        });
+        switch($_POST['persona_action']) {
+            case 'login':
+                $output = $this->login();
+                break;
+            case 'logout':
+            default:
+                $this->logout();
+                break;
+        }
+        if($respond) {
+            $this->respond($output, $exit);
+        }
+        return $output;
     }
 
     /**
@@ -420,14 +455,24 @@ class Persona
      * @param boolean $exit Exit after sending response.
      * @return null|string $output The output JSON data.
      */
-    function respond($output, $exit = true)
+    function respond(array $output, $exit = true)
     {
         http_response_code(200);
         header('Content-Type: application/json');
         # header(sprintf('Content-Length: %d', strlen($output)));
         header(sprintf('X-Persona-Audience: %s', $this->audience()));
-        if($email) header(sprintf('X-Persona-User: %s', $email));
-        if($exit) exit($output);
+        $output['error'] = false;
+        $output = json_encode($output, JSON_FORCE_OBJECT);
+        if(JSON_ERROR_NONE != json_last_error()) {
+            throw new \Exception('Failed to encode JSON response.');
+        }
+        if(!empty($_SESSION['persona_auth'])) {
+            $email = $_SESSION['persona_auth'];
+            header(sprintf('X-Persona-User: %s', $email));
+        }
+        if($exit) {
+            exit($output);
+        }
         return $output;
     }
 
@@ -439,8 +484,8 @@ class Persona
      */
     function render()
     {
-        $auth = isset($_SESSION['persona_auth']);
-        $user = $auth ? $_SESSION['persona_auth'] : '';
+        $auth = !empty($_SESSION['persona_auth']);
+        $user = $auth ? $_SESSION['persona_auth'] : 'Persona';
         $js_user = $auth ? sprintf('"%s"', $user) : 'null';
         $processor = $this->processor();
         ob_start();
@@ -453,7 +498,8 @@ window.jQuery || document.write('<script src="//ajax.googleapis.com/ajax/libs/jq
 </script>
 <script>
 $(function() {
-    var auth_field = $("#persona_auth a#persona_action");
+    var field = $("#persona_auth a#persona_action");
+    var email;
     navigator.id.watch({
         loggedInUser: <?= $js_user ?>,
         onlogin: function(assertion) {
@@ -461,48 +507,49 @@ $(function() {
                 persona_action: 'login',
                 assertion: assertion
             }, function(data) {
-                if(data.status != 'ok') {
-                    var reason = data.reason || '<?= _('Unknown reason.') ?>';
-                    alert('<?= _('Error:') ?>\n%s'.replace('%s', reason));
+                try { console.debug(data); } catch(a) {}
+                if(true == data.error) {
+                    alert('Error: ' + (data.message || 'Unknown reason.'));
                 } else {
-                    var email = data.email || 'Persona';
-                    $(auth_field).text('<?= _('Log Out [%s]') ?>'.replace('%s', email));
+                    email = data.email || 'Persona';
+                    $('#persona_action_logout').text('Log Out ['+ email +']');
+                    $('#persona_action_login').hide();
+                    $('#persona_action_logout').show();
                 }
             }).fail(function() {
-                alert('<?= _('Absent or malformed response to XHR.') ?>');
+                alert('Absent or malformed response to XHR [1].');
             });
         },
         onlogout: function() {
             $.post('<?= $processor ?>', {
                 persona_action: 'logout'
             }, function(data) {
-                if(data.status != 'ok') {
-                    var reason = data.reason || '<?= _('Unknown reason.') ?>';
-                    alert('<?= _('Error:') ?>\n%s'.replace('%s', reason));
+                try { console.debug(data); } catch(a) {}
+                if(true == data.error) {
+                    alert('Error: ' + (data.message || 'Unknown reason.'));
                 } else {
-                    $(auth_field).text('<?= _('Log In [Persona]') ?>');
+                    $('#persona_action_logout').text('');
+                    $('#persona_action_logout').hide();
+                    $('#persona_action_login').show();
                 }
             }).fail(function() {
-                alert('<?= _('Absent or malformed response to XHR.') ?>');
+                alert('Absent or malformed response to XHR [2].');
             });
         }
     });
-    $(auth_field).click(function(ev) {
+    $('#persona_action_login').click(function(ev) {
         ev && ev.preventDefault && ev.preventDefault();
-        <?php if($auth): ?>
-            navigator.id.logout();
-        <?php else: ?>
-            navigator.id.request();
-        <?php endif; ?>
+        navigator.id.request();
+    });
+    $('#persona_action_logout').click(function(ev) {
+        ev && ev.preventDefault && ev.preventDefault();
+        navigator.id.logout();
     });
 });
 </script>
-<!-- <a href="" class="auth" id="persona_action">[<?= _('Loading &hellip;') ?>]</a> -->
-<?php if($auth): ?>
-<a href="" class="auth" id="persona_action"><?= _('Log Out') ?> [<?= $user ?>]</a>
-<?php else: ?>
-<a href="" class="auth" id="persona_action"><?= _('Log In') ?> [Persona]</a>
-<?php endif; ?>
+<!-- <a href="" class="auth" id="persona_action">[Loading &hellip;]</a> -->
+<a href="" class="auth" id="persona_action_logout"></a>
+<a href="" class="auth" id="persona_action_login">Log In [Persona]</a>
 </div>
 </div>
         <?php
@@ -546,6 +593,6 @@ function BrowserID_Handle($audience = '', $endpoint = null, $processor = '')
     return (string) $persona;
 }
 
-# echo BrowserID_Handle();
+echo BrowserID_Handle();
 
 } // End global namespace
