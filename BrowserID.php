@@ -19,7 +19,7 @@ namespace kafene
  * --------------------------------------------------------------------------- *
  *
  * USAGE:
- * 
+ *
  * For basic usage, you can call kafene\Persona::getInstance()->server()
  * somewhere before your response is sent. If it detects that the current
  * request meets all of the criteria that make it an AJAX request from the
@@ -45,6 +45,15 @@ namespace kafene
  * --------------------------------------------------------------------------- *
  *
  * CHANGES:
+ *
+ * 2013-07-08
+ *     * Fixed so it works in Opera, which is very buggy with Persona due to its
+ *       implementation of the same-origin policy. Unfortunately this means rely
+ *       on data from PHP instead of from Persona onLogin but it should be the
+ *       same information, anyway.
+ *     * Removed guessProcessor, just using SCRIPT_NAME instead as it should
+ *       work better in most cases. If not you can always set it manually :)
+ *     * Diversify Exception classes.
  *
  * 2013-05-05:
  *     new session/request keys:
@@ -115,7 +124,7 @@ class Persona
         $this->audience($audience);
         $this->processor($processor);
         $this->endpoint($endpoint);
-        if(session_status() != PHP_SESSION_ACTIVE) {
+        if (session_status() != PHP_SESSION_ACTIVE) {
             session_start();
         }
         return $this;
@@ -145,32 +154,17 @@ class Persona
      */
     function processor($new = null)
     {
-        if(!$this->processor || $new) {
-            $this->processor = $new ?: $this->guessProcessor();
+        if (!$this->processor || $new) {
+            $this->processor = $new ?: $this->audience().getenv('SCRIPT_NAME');
         }
-        if(null === $new) {
+        if (null === $new) {
             return $this->processor;
         }
-        if(!filter_var($this->processor, FILTER_VALIDATE_URL)) {
+        if (!filter_var($this->processor, FILTER_VALIDATE_URL)) {
             $errstr = 'Invalid processor "'.$this->processor.'".';
-            throw new \Exception($errstr);
+            throw new \UnexpectedValueException($errstr);
         }
         return $this;
-    }
-
-    /**
-     * Build a likely processor URL (the current script URL).
-     *
-     * @return string guessed URL
-     */
-    protected function guessProcessor()
-    {
-        # $uri = getenv('REQUEST_URI') ?: '/';
-        $root = preg_quote(strtr(getenv('DOCUMENT_ROOT'), '\\', '/'), '/');
-        $script = strtr(getenv('SCRIPT_FILENAME'), '\\', '/');
-        $uri = preg_replace("/^$root/i", '', $script);
-        $base = $this->guessAudience();
-        return sprintf('%s/%s', rtrim($base, '/'), ltrim($uri, '/'));
     }
 
     /**
@@ -182,15 +176,15 @@ class Persona
      */
     function audience($new = null)
     {
-        if(!$this->audience || $new) {
+        if (!$this->audience || $new) {
             $this->audience = $new ?: $this->guessAudience();
         }
-        if(null === $new) {
+        if (null === $new) {
             return $this->audience;
         }
-        if(!filter_var($this->audience, FILTER_VALIDATE_URL)) {
+        if (!filter_var($this->audience, FILTER_VALIDATE_URL)) {
             $errstr = 'Invalid audience "'.$this->audience.'".';
-            throw new \Exception($errstr);
+            throw new \UnexpectedValueException($errstr);
         }
         return $this;
     }
@@ -203,11 +197,11 @@ class Persona
      */
     protected function guessAudience()
     {
-        $ssl = filter_var(getenv('HTTPS'), FILTER_VALIDATE_BOOLEAN);
-        $scheme = $ssl ? 'https' : 'http';
+        $secure = filter_var(getenv('HTTPS'), FILTER_VALIDATE_BOOLEAN);
+        $scheme = $secure ? 'https' : 'http';
         $host = getenv('HTTP_HOST') ?: getenv('SERVER_NAME');
         $p = intval(getenv('SERVER_PORT')) ?: 80;
-        $port = (($ssl && 443 == $p) || 80 == $p) ? '' : sprintf(':%d', $p);
+        $port = (($secure && 443 == $p) || 80 == $p) ? '' : sprintf(':%d', $p);
         return sprintf('%s://%s%s', $scheme, $host, $port);
     }
 
@@ -220,13 +214,13 @@ class Persona
      */
     function endpoint($new = null)
     {
-        if(null === $new) {
+        if (null === $new) {
             return $this->endpoint;
         }
         $this->endpoint = $new;
-        if(!filter_var($this->endpoint, FILTER_VALIDATE_URL)) {
+        if (!filter_var($this->endpoint, FILTER_VALIDATE_URL)) {
             $errstr = 'Invalid endpoint "'.$this->endpoint.'".';
-            throw new \Exception($errstr);
+            throw new \UnexpectedValueException($errstr);
         }
         return $this;
     }
@@ -246,10 +240,10 @@ class Persona
             'header' => 'Content-type: application/x-www-form-urlencoded',
             'content' => http_build_query($data, '', '&')
         ]]);
-        if($response = file_get_contents($this->endpoint(), null, $ctx)) {
+        if ($response = file_get_contents($this->endpoint(), null, $ctx)) {
             return $response;
         } else {
-            throw new \Exception('Getting response from endpoint failed.');
+            throw new \RuntimeException('Getting response from endpoint failed.');
         }
     }
 
@@ -263,34 +257,34 @@ class Persona
     protected function checkResponse($response)
     {
         # Check that response was rec'd.
-        if(empty($response) || !$response) {
-            throw new \Exception('No response was received from the verifier.');
+        if (empty($response) || !$response) {
+            throw new \DomainException('No response was received from the verifier.');
         }
         # Check for ok JSON
         $json = $this->response = json_decode($response);
-        if(json_last_error() !== JSON_ERROR_NONE) {
-            throw new \Exception('Parsing response JSON failed.');
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new \UnexpectedValueException('Parsing response JSON failed.');
         }
         # Check response has status
-        if(empty($json->status)) {
-            throw new \Exception('No status received from endpoint.');
+        if (empty($json->status)) {
+            throw new \DomainException('No status received from endpoint.');
         }
         # Check failure status
-        if(preg_match('/fail(ure|ed)?/i', $json->status)) {
+        if (preg_match('/fail(ure|ed)?/i', $json->status)) {
             $reason = empty($json->reason) ? 'Unknown reason.' : $json->reason;
-            throw new \Exception("Authentication failure: $reason");
+            throw new \RuntimeException("Authentication failure: $reason");
         }
         # Check for 'okay' status
-        if($json->status != 'okay') {
-            throw new \Exception('"Okay" response was not received from the endpoint.');
+        if ($json->status != 'okay') {
+            throw new \UnexpectedValueException('"Okay" response was not received from the endpoint.');
         }
         # Check for email
-        if(empty($json->email)) {
-            throw new \Exception('Email was not received with response');
+        if (empty($json->email)) {
+            throw new \DomainException('Email was not received with response');
         }
         # Verify email
-        if(!filter_var($json->email, FILTER_VALIDATE_EMAIL)) {
-            throw new \Exception('Invalid Email address.');
+        if (!filter_var($json->email, FILTER_VALIDATE_EMAIL)) {
+            throw new \UnexpectedValueException('Invalid Email address.');
         }
         # All tests passed.
         return true;
@@ -310,13 +304,13 @@ class Persona
         $filter = FILTER_UNSAFE_RAW;
         $flags = FILTER_FLAG_STRIP_LOW | FILTER_FLAG_STRIP_HIGH;
         $assertion = filter_input(INPUT_POST, 'assertion', $filter, $flags);
-        if(!$assertion) {
-            throw new \Exception('Missing assertion.');
+        if (!$assertion) {
+            throw new \BadMethodCallException('Missing assertion.');
         }
         $this->response = $this->getResponse($assertion);
         # We'll either get `true` for success, or error strings for errors.
-        if(true !== $check = $this->checkResponse($this->response)) {
-            throw new \Exception('checkResponse() failed.');
+        if (true !== $this->checkResponse($this->response)) {
+            throw new \RuntimeException('checkResponse() failed.');
         }
         $json = $this->response;
         $_SESSION['persona_auth'] = $json->email;
@@ -335,10 +329,10 @@ class Persona
     {
         $_SESSION['persona_auth'] = $_SESSION['persona_info'] = null;
         unset($_SESSION['persona_auth'], $_SESSION['persona_info']);
-        if(!isset($_SESSION['persona_auth'], $_SESSION['persona_info'])) {
+        if (!isset($_SESSION['persona_auth'], $_SESSION['persona_info'])) {
             return true;
         } else {
-            throw new \Exception('Logout failed.');
+            throw new \UnexpectedValueException('Logout failed.');
         }
     }
 
@@ -352,7 +346,7 @@ class Persona
     {
         $user = $this->user();
         # @todo - maybe throw an exception - checking expired with no login?
-        if(!$user || !isset($_SESSION['persona_info']['expires'])) {
+        if (!$user || !isset($_SESSION['persona_info']['expires'])) {
             return true;
         }
         $expires = (int) $_SESSION['persona_info']['expires'] / 1000; # ms -> s
@@ -369,14 +363,14 @@ class Persona
      */
     function user($bool = false, &$info = null)
     {
-        if(isset($_SESSION['persona_auth'], $_SESSION['persona_info'])) {
-            if($this->expired()) {
+        if (isset($_SESSION['persona_auth'], $_SESSION['persona_info'])) {
+            if ($this->expired()) {
                 $this->logout();
                 return false;
             }
             $default = [
                 'email' => '',
-                'audience' => $this->audience(), 
+                'audience' => $this->audience(),
                 'expires' => 0,
                 'issuer' => '',
             ];
@@ -426,7 +420,7 @@ class Persona
      */
     function server($respond = true, $exit = true)
     {
-        if(!$this->shouldServe()) {
+        if (!$this->shouldServe()) {
             return;
         }
         set_exception_handler([$this, 'ajaxError']);
@@ -442,7 +436,7 @@ class Persona
                 $this->logout();
                 break;
         }
-        if($respond) {
+        if ($respond) {
             $this->respond($output, $exit);
         }
         return $output;
@@ -463,14 +457,14 @@ class Persona
         header(sprintf('X-Persona-Audience: %s', $this->audience()));
         $output['error'] = false;
         $output = json_encode($output, JSON_FORCE_OBJECT);
-        if(JSON_ERROR_NONE != json_last_error()) {
-            throw new \Exception('Failed to encode JSON response.');
+        if (JSON_ERROR_NONE != json_last_error() || '' == trim($output)) {
+            throw new \RuntimeException('Failed to encode JSON response.');
         }
-        if(!empty($_SESSION['persona_auth'])) {
+        if (!empty($_SESSION['persona_auth'])) {
             $email = $_SESSION['persona_auth'];
             header(sprintf('X-Persona-User: %s', $email));
         }
-        if($exit) {
+        if ($exit) {
             exit($output);
         }
         return $output;
@@ -499,6 +493,8 @@ window.jQuery || document.write('<script src="//ajax.googleapis.com/ajax/libs/jq
 <script>
 $(function() {
     var field = $("#persona_auth a#persona_action");
+    var isloggedin = <?= $auth ? 'true' : 'false' ?>;
+    var loggeduser = <?= $js_user ?>;
     var email;
     navigator.id.watch({
         loggedInUser: <?= $js_user ?>,
@@ -508,7 +504,7 @@ $(function() {
                 assertion: assertion
             }, function(data) {
                 try { console.debug(data); } catch(a) {}
-                if(true == data.error) {
+                if (true == data.error) {
                     alert('Error: ' + (data.message || 'Unknown reason.'));
                 } else {
                     email = data.email || 'Persona';
@@ -525,7 +521,7 @@ $(function() {
                 persona_action: 'logout'
             }, function(data) {
                 try { console.debug(data); } catch(a) {}
-                if(true == data.error) {
+                if (true == data.error) {
                     alert('Error: ' + (data.message || 'Unknown reason.'));
                 } else {
                     $('#persona_action_logout').text('');
@@ -545,6 +541,15 @@ $(function() {
         ev && ev.preventDefault && ev.preventDefault();
         navigator.id.logout();
     });
+    if (isloggedin && loggeduser) {
+        $('#persona_action_logout').text('Log Out ['+ loggeduser +']');
+        $('#persona_action_login').hide();
+        $('#persona_action_logout').show();
+    } else {
+        $('#persona_action_logout').text('');
+        $('#persona_action_logout').hide();
+        $('#persona_action_login').show();
+    }
 });
 </script>
 <!-- <a href="" class="auth" id="persona_action">[Loading &hellip;]</a> -->
@@ -576,7 +581,7 @@ namespace {
 /**
  * A wrapper to handle instantiating, configuring and loading
  * an instance of \kafene\Persona.
- * 
+ *
  * @global
  * @param string $audience Audience to pass to the verifier.
  * @param string $endpoint Endpoint for auth provider.
@@ -586,13 +591,11 @@ namespace {
 function BrowserID_Handle($audience = '', $endpoint = null, $processor = '')
 {
     $persona = \kafene\Persona::getInstance();
-    if($audience) $persona->audience($audience);
-    if($processor) $persona->processor($processor);
-    if($endpoint) $persona->endpoint($endpoint);
+    if ($audience) $persona->audience($audience);
+    if ($processor) $persona->processor($processor);
+    if ($endpoint) $persona->endpoint($endpoint);
     $persona->server();
     return (string) $persona;
 }
-
-echo BrowserID_Handle();
 
 } // End global namespace
